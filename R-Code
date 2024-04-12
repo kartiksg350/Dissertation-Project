@@ -1,0 +1,749 @@
+# Load necessary libraries
+library(dplyr)
+library(readr)
+library(lubridate)
+library(ggplot2)
+library(car)
+
+# Load the combined CSV file
+combined_data <- read.csv("/Users/kartiksg/Downloads/combined_data.csv", stringsAsFactors = FALSE)
+
+# Remove rows with any empty cells
+cleaned_data <- combined_data %>%
+  filter(complete.cases(.))
+
+# View the cleaned data
+head(cleaned_data)
+
+# Subset for theatres with shared anaesthetic room (Th11 and Th12)
+shared_anaesthetic_data <- cleaned_data %>%
+  filter(Theatre %in% c("Th11", "Th12"))
+
+# Subset for theatres with dedicated anaesthetic room (Th09, Th10, and Th16)
+dedicated_anaesthetic_data <- cleaned_data %>%
+  filter(Theatre %in% c("Th09", "Th10", "Th16"))
+
+# View the first few rows of each subset
+head(shared_anaesthetic_data)
+head(dedicated_anaesthetic_data)
+
+# Convert date-time columns to only time format
+datetime_cols <- c("Sent.For", "Into.care.of.anaes", "Into.Theatre", "Ready.for.surgeon", "Start.Procedure", "End.Procedure", "Out.of.Theatre", "Leave.recovery")
+shared_anaesthetic_data[datetime_cols] <- lapply(shared_anaesthetic_data[datetime_cols], function(x) {
+  format(as.POSIXct(x, format="%Y-%m-%d %H:%M:%S"), "%H:%M:%S")
+})
+
+dedicated_anaesthetic_data[datetime_cols] <- lapply(dedicated_anaesthetic_data[datetime_cols], function(x) {
+  format(as.POSIXct(x, format="%Y-%m-%d %H:%M:%S"), "%H:%M:%S")
+})
+
+# Remove rows with NA in key columns
+shared_anaesthetic_data <- shared_anaesthetic_data %>%
+  filter(!is.na(`Into.Theatre`) & !is.na(`Out.of.Theatre`))
+
+dedicated_anaesthetic_data <- dedicated_anaesthetic_data %>%
+  filter(!is.na(`Into.Theatre`) & !is.na(`Out.of.Theatre`))
+
+# Temporarily restore the full datetime format
+shared_anaesthetic_data[datetime_cols] <- lapply(shared_anaesthetic_data[datetime_cols], function(x) {
+  as.POSIXct(paste(shared_anaesthetic_data$`Operation.Date`, x), format="%Y-%m-%d %H:%M:%S")
+})
+
+# Calculate theatre turnover time for theatres with shared anaesthetic room
+shared_anaesthetic_data <- shared_anaesthetic_data %>%
+  arrange(Theatre, `Operation.Date`, `Into.Theatre`) %>%
+  group_by(Theatre, `Operation.Date`) %>%
+  mutate(Turnover_Time = as.numeric(difftime(lead(`Into.Theatre`, 1), `Out.of.Theatre`, units = "mins"))) %>%
+  ungroup()
+
+# Temporarily restore the full datetime format for dedicated_anaesthetic_data
+dedicated_anaesthetic_data[datetime_cols] <- lapply(dedicated_anaesthetic_data[datetime_cols], function(x) {
+  as.POSIXct(paste(dedicated_anaesthetic_data$`Operation.Date`, x), format="%Y-%m-%d %H:%M:%S")
+})
+
+# Calculate theatre turnover time for theatres with dedicated anaesthetic room
+dedicated_anaesthetic_data <- dedicated_anaesthetic_data %>%
+  arrange(Theatre, `Operation.Date`, `Into.Theatre`) %>%
+  group_by(Theatre, `Operation.Date`) %>%
+  mutate(Turnover_Time = as.numeric(difftime(lead(`Into.Theatre`, 1), `Out.of.Theatre`, units = "mins"))) %>%
+  ungroup()
+
+# Filter out rows with turnover time below 5 mins or above 45 mins for both subsets
+shared_anaesthetic_data <- shared_anaesthetic_data %>%
+  filter(Turnover_Time >= 5 & Turnover_Time <= 45)
+
+dedicated_anaesthetic_data <- dedicated_anaesthetic_data %>%
+  filter(Turnover_Time >= 5 & Turnover_Time <= 45)
+
+# View the first few rows of each subset to verify
+head(shared_anaesthetic_data)
+head(dedicated_anaesthetic_data)
+
+#SUMMARY STATISTICS FOR SHARED ANAESTHETIC ROOM THEEATRES
+print("Summary statistics for theatres with shared anaesthetic room:")
+shared_summary <- summary(shared_anaesthetic_data$Turnover_Time)
+print(shared_summary)
+
+# Create the barplot with data labels for Shared Anaesthetic Room
+print("Bar plot for theatres with shared anaesthetic room:")
+ggplot(shared_anaesthetic_data, aes(x = factor(Theatre), y = Turnover_Time)) +
+  stat_summary(fun = mean, geom = "bar", aes(fill = factor(Theatre))) +
+  stat_summary(fun = mean, geom = "text", aes(label = round(..y.., 2)), vjust = -0.5) +
+  labs(title = "Average Theatre Turnover Time for Shared Anaesthetic Room", x = "Theatre", y = "Average Turnover Time (minutes)") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1")
+
+# Create the boxplot with data labels for Shared Anaesthetic Room
+plot_shared <- ggplot(shared_anaesthetic_data, aes(x = Theatre, y = Turnover_Time, fill = Theatre)) +
+  geom_boxplot(outlier.shape = NA) +  # Don't plot outliers as points
+  geom_jitter(width = 0.2, alpha = 0.4) +  # Add individual data points
+  stat_summary(fun = "median", geom = "crossbar", width = 0.6, aes(group = Theatre), color = "white") +  # Highlight the median
+  labs(title = "Distribution of Turnover Times in Shared Anaesthetic Room",
+       y = "Turnover Time (minutes)",
+       x = "Theatre") +
+  theme_minimal()
+
+print(plot_shared)
+
+#SUMMARY STATISTICS FOR DEDICATED ANAESTHETIC ROOM THEEATRES
+print("Summary statistics for theatres with dedicated anaesthetic room:")
+dedicated_summary <- summary(dedicated_anaesthetic_data$Turnover_Time)
+print(dedicated_summary)
+
+# Create the barplot with data labels for Dedicated Anaesthetic Room
+print("Bar plot for theatres with dedicated anaesthetic room:")
+ggplot(dedicated_anaesthetic_data, aes(x = factor(Theatre), y = Turnover_Time)) +
+  stat_summary(fun = mean, geom = "bar", aes(fill = factor(Theatre))) +
+  stat_summary(fun = mean, geom = "text", aes(label = round(..y.., 2)), vjust = -0.5) +
+  labs(title = "Average Theatre Turnover Time for Dedicated Anaesthetic Room", x = "Theatre", y = "Average Turnover Time (minutes)") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1")
+
+# Create the boxplot with data labels for Dedicated Anaesthetic Room
+plot_dedicated <- ggplot(dedicated_anaesthetic_data, aes(x = Theatre, y = Turnover_Time, fill = Theatre)) +
+  geom_boxplot(outlier.shape = NA) +  # Don't plot outliers as points
+  geom_jitter(width = 0.2, alpha = 0.4) +  # Add individual data points
+  stat_summary(fun = "median", geom = "crossbar", width = 0.6, aes(group = Theatre), color = "white") +  # Highlight the median
+  labs(title = "Distribution of Turnover Times in Dedicated Anaesthetic Room",
+       y = "Turnover Time (minutes)",
+       x = "Theatre") +
+  theme_minimal()
+
+print(plot_dedicated)
+
+# Combine the two datasets with an additional column to indicate room type
+combined_data <- rbind(
+  mutate(shared_anaesthetic_data, Room_Type = "Shared"),
+  mutate(dedicated_anaesthetic_data, Room_Type = "Dedicated")
+)
+
+# Create the boxplot with data labels
+plot <- ggplot(combined_data, aes(x = Room_Type, y = Turnover_Time, fill = Room_Type)) +
+  geom_boxplot(outlier.shape = NA) +  # Don't plot outliers as points
+  geom_jitter(width = 0.2, alpha = 0.4) +  # Add individual data points
+  stat_summary(fun = "median", geom = "crossbar", width = 0.6, aes(group = Room_Type), color = "white") +  # Highlight the median
+  labs(title = "Distribution of Turnover Times by Anaesthetic Room Type",
+       y = "Turnover Time (minutes)",
+       x = "Anaesthetic Room Type") +
+  theme_minimal() +
+  theme(legend.position = "none") +  # Remove legend since fill is self-explanatory
+  scale_fill_manual(values = c("Shared" = "#56B4E9", "Dedicated" = "#D55E00"))
+
+print(plot)
+
+print("Comparison bar plot:")
+ggplot(combined_data, aes(x = factor(Theatre), y = Turnover_Time, fill = Room_Type)) +
+  stat_summary(fun = mean, geom = "bar", position = "dodge") +
+  stat_summary(fun = mean, geom = "text", aes(label = round(..y.., 2)), position = position_dodge(width = 0.9), vjust = -0.5) +
+  labs(title = "Comparison of Average Theatre Turnover Time", x = "Theatre", y = "Average Turnover Time (minutes)") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Shared" = "blue", "Dedicated" = "orange"))
+
+#REGRESSION ANALYSIS
+#ASSUMPTION CHECK FOR T-TEST
+#SHAPIRO-WILK NORMALITY TEST
+set.seed(123) # Setting a seed for reproducibility
+sample_shared <- sample_n(shared_anaesthetic_data, 4000)
+sample_dedicated <- sample_n(dedicated_anaesthetic_data, 4000)
+
+shapiro_test_sample_shared <- shapiro.test(sample_shared$Turnover_Time)
+shapiro_test_sample_dedicated <- shapiro.test(sample_dedicated$Turnover_Time)
+
+print("Shapiro-Wilk Normality Test for Sampled Shared Anaesthetic Room:")
+print(shapiro_test_sample_shared)
+
+print("Shapiro-Wilk Normality Test for Sampled Dedicated Anaesthetic Room:")
+print(shapiro_test_sample_dedicated)
+
+#LEVEN'S TEST FOR HOMOGENEITY OF VARIANCE
+levene_test <- leveneTest(Turnover_Time ~ Room_Type, data = combined_data)
+print("Levene's Test for Homogeneity of Variance:")
+print(levene_test)
+
+# Histograms
+par(mfrow=c(1,2))
+hist(shared_anaesthetic_data$Turnover_Time, main="Shared Anaesthetic Room", xlab="Turnover Time")
+hist(dedicated_anaesthetic_data$Turnover_Time, main="Dedicated Anaesthetic Room", xlab="Turnover Time")
+
+# Q-Q plots
+par(mfrow=c(1,2))
+qqnorm(shared_anaesthetic_data$Turnover_Time); qqline(shared_anaesthetic_data$Turnover_Time)
+qqnorm(dedicated_anaesthetic_data$Turnover_Time); qqline(dedicated_anaesthetic_data$Turnover_Time)
+
+#MANN-WHITNEY U TEST
+mw_test <- wilcox.test(shared_anaesthetic_data$Turnover_Time, dedicated_anaesthetic_data$Turnover_Time)
+
+print("Mann-Whitney U Test:")
+print(mw_test)
+
+#EFFECT OF DIFFERENT FACTORS ON THEATRE TURNOVER TIME
+# Recategorizing Anaesth.Type
+shared_anaesthetic_data$Anaesth_Type_Revised <- case_when(
+  grepl("GA", shared_anaesthetic_data$Anaesth.Type, ignore.case = TRUE) ~ "General",
+  grepl("Local|Regional", shared_anaesthetic_data$Anaesth.Type, ignore.case = TRUE) ~ "Local",
+  grepl("Spinal", shared_anaesthetic_data$Anaesth.Type, ignore.case = TRUE) ~ "Spinal",
+  TRUE ~ "Others"
+)
+
+dedicated_anaesthetic_data$Anaesth_Type_Revised <- case_when(
+  grepl("GA", dedicated_anaesthetic_data$Anaesth.Type, ignore.case = TRUE) ~ "General",
+  grepl("Local|Regional", dedicated_anaesthetic_data$Anaesth.Type, ignore.case = TRUE) ~ "Local",
+  grepl("Spinal", dedicated_anaesthetic_data$Anaesth.Type, ignore.case = TRUE) ~ "Spinal",
+  TRUE ~ "Others"
+)
+
+# Descriptive statistics for shared anaesthetic room by Anaesth_Type_Revised
+library(dplyr)
+library(tidyverse)
+
+# For the shared anaesthetic data:
+shared_box_stats <- shared_anaesthetic_data %>%
+  group_by(Anaesth_Type_Revised) %>%
+  summarize(
+    Min = min(Turnover_Time, na.rm = TRUE),
+    `1st Qu` = quantile(Turnover_Time, 0.25, na.rm = TRUE),
+    Median = median(Turnover_Time, na.rm = TRUE),
+    Mean = mean(Turnover_Time, na.rm = TRUE),
+    `3rd Qu` = quantile(Turnover_Time, 0.75, na.rm = TRUE),
+    Max = max(Turnover_Time, na.rm = TRUE)
+  )
+
+# For the dedicated anaesthetic data:
+dedicated_box_stats <- dedicated_anaesthetic_data %>%
+  group_by(Anaesth_Type_Revised) %>%
+  summarize(
+    Min = min(Turnover_Time, na.rm = TRUE),
+    `1st Qu` = quantile(Turnover_Time, 0.25, na.rm = TRUE),
+    Median = median(Turnover_Time, na.rm = TRUE),
+    Mean = mean(Turnover_Time, na.rm = TRUE),
+    `3rd Qu` = quantile(Turnover_Time, 0.75, na.rm = TRUE),
+    Max = max(Turnover_Time, na.rm = TRUE)
+  )
+
+# Print the results
+print(shared_box_stats)
+print(dedicated_box_stats)
+
+library(ggplot2)
+
+# Plotting for Shared Anaesthetic Room
+ggplot(shared_box_stats, aes(x=Anaesth_Type_Revised, y=Mean)) +
+  geom_bar(stat="identity", fill="skyblue", color="black") +
+  geom_text(aes(label=sprintf("%.2f", Mean)), vjust=-0.5) +
+  labs(title="Mean Turnover Time by Anaesthesia Type (Shared Room)",
+       x="Anaesthesia Type", y="Mean Turnover Time (mins)") +
+  theme_minimal() +
+  theme(axis.title.x=element_text(face="bold"),
+        axis.title.y=element_text(face="bold"),
+        plot.title=element_text(hjust=0.5, face="bold")) +
+  coord_cartesian(ylim=c(0, max(shared_box_stats$Mean + 5)))
+
+# Plotting for Dedicated Anaesthetic Room
+ggplot(dedicated_box_stats, aes(x=Anaesth_Type_Revised, y=Mean)) +
+  geom_bar(stat="identity", fill="coral", color="black") +
+  geom_text(aes(label=sprintf("%.2f", Mean)), vjust=-0.5) +
+  labs(title="Mean Turnover Time by Anaesthesia Type (Dedicated Room)",
+       x="Anaesthesia Type", y="Mean Turnover Time (mins)") +
+  theme_minimal() +
+  theme(axis.title.x=element_text(face="bold"),
+        axis.title.y=element_text(face="bold"),
+        plot.title=element_text(hjust=0.5, face="bold")) +
+  coord_cartesian(ylim=c(0, max(dedicated_box_stats$Mean + 5)))
+
+# Boxplot for shared anaesthetic room
+cat("\nBoxplot for Shared Anaesthetic Room by Anaesthesia Type:\n")
+boxplot(Turnover_Time ~ Anaesth_Type_Revised, data = shared_anaesthetic_data,
+        main = "Shared Anaesthetic Room by Anaesthesia Type",
+        xlab = "Anaesthesia Type", ylab = "Turnover Time (mins)")
+
+# Boxplot for dedicated anaesthetic room
+cat("\nBoxplot for Dedicated Anaesthetic Room by Anaesthesia Type:\n")
+boxplot(Turnover_Time ~ Anaesth_Type_Revised, data = dedicated_anaesthetic_data,
+        main = "Dedicated Anaesthetic Room by Anaesthesia Type",
+        xlab = "Anaesthesia Type", ylab = "Turnover Time (mins)")
+
+# ANOVA test for shared anaesthetic room
+anova_shared <- aov(Turnover_Time ~ Anaesth_Type_Revised, data = shared_anaesthetic_data)
+cat("\nANOVA for Shared Anaesthetic Room by Anaesthesia Type:\n")
+print(summary(anova_shared))
+
+# ANOVA test for dedicated anaesthetic room
+anova_dedicated <- aov(Turnover_Time ~ Anaesth_Type_Revised, data = dedicated_anaesthetic_data)
+cat("\nANOVA for Dedicated Anaesthetic Room by Anaesthesia Type:\n")
+print(summary(anova_dedicated))
+
+#ASA CLASS
+# Shared anaesthetic room
+shared_summary_asa <- shared_anaesthetic_data %>%
+  group_by(ASA.class) %>%
+  summarise(
+    Min = min(Turnover_Time, na.rm = TRUE),
+    `1st Qu` = quantile(Turnover_Time, 0.25, na.rm = TRUE),
+    Median = median(Turnover_Time, na.rm = TRUE),
+    Mean = mean(Turnover_Time, na.rm = TRUE),
+    `3rd Qu` = quantile(Turnover_Time, 0.75, na.rm = TRUE),
+    Max = max(Turnover_Time, na.rm = TRUE)
+  )
+
+# Dedicated anaesthetic room
+dedicated_summary_asa <- dedicated_anaesthetic_data %>%
+  group_by(ASA.class) %>%
+  summarise(
+    Min = min(Turnover_Time, na.rm = TRUE),
+    `1st Qu` = quantile(Turnover_Time, 0.25, na.rm = TRUE),
+    Median = median(Turnover_Time, na.rm = TRUE),
+    Mean = mean(Turnover_Time, na.rm = TRUE),
+    `3rd Qu` = quantile(Turnover_Time, 0.75, na.rm = TRUE),
+    Max = max(Turnover_Time, na.rm = TRUE)
+  )
+
+print(shared_summary_asa)
+print(dedicated_summary_asa)
+
+# Filter out unwanted ASA classes
+filtered_shared <- shared_summary_asa %>%
+  filter(!ASA.class %in% c("", "ASA 5", "ASA 6"))
+
+filtered_dedicated <- dedicated_summary_asa %>%
+  filter(ASA.class != "")
+
+# Bar plot for shared anaesthetic room
+ggplot(filtered_shared, aes(x = ASA.class, y = Median)) +
+  geom_bar(stat = "identity", fill = "#56B4E9") +
+  geom_text(aes(label = round(Median, 1)), vjust = -0.5) +
+  labs(title = "Turnover Time by ASA Class (Shared Anaesthetic Room)",
+       x = "ASA Class",
+       y = "Median Turnover Time (mins)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Bar plot for dedicated anaesthetic room
+ggplot(filtered_dedicated, aes(x = ASA.class, y = Median)) +
+  geom_bar(stat = "identity", fill = "#D55E00") +
+  geom_text(aes(label = round(Median, 1)), vjust = -0.5) +
+  labs(title = "Turnover Time by ASA Class (Dedicated Anaesthetic Room)",
+       x = "ASA Class",
+       y = "Median Turnover Time (mins)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Perform ANOVA for shared anaesthetic room
+anova_shared_asa <- aov(Turnover_Time ~ ASA.class, data = shared_anaesthetic_data %>% 
+                          filter(!ASA.class %in% c("", "ASA 5", "ASA 6")))
+summary_shared_asa <- summary(anova_shared_asa)
+
+# Perform ANOVA for dedicated anaesthetic room
+anova_dedicated_asa <- aov(Turnover_Time ~ ASA.class, data = dedicated_anaesthetic_data %>% 
+                             filter(ASA.class != ""))
+summary_dedicated_asa <- summary(anova_dedicated_asa)
+
+# Print the results
+print("ANOVA result for Shared Anaesthetic Room:")
+print(summary_shared_asa)
+
+print("ANOVA result for Dedicated Anaesthetic Room:")
+print(summary_dedicated_asa)
+
+# Filter out the specified ASA classes for shared and dedicated datasets
+filtered_shared_anaesthetic_data <- shared_anaesthetic_data %>% filter(!(ASA.class %in% c("", "ASA 5", "ASA 6")))
+filtered_dedicated_anaesthetic_data <- dedicated_anaesthetic_data %>% filter(ASA.class != "")
+
+# Perform Tukey HSD post-hoc test for the filtered datasets
+
+# For Shared Anaesthetic Room
+aov_shared_asa_filtered <- aov(Turnover_Time ~ ASA.class, data=filtered_shared_anaesthetic_data)
+tukey_shared_asa_filtered <- TukeyHSD(aov_shared_asa_filtered, conf.level=0.95)
+print("Tukey HSD post-hoc results for Filtered Shared Anaesthetic Room based on ASA Class:")
+print(tukey_shared_asa_filtered)
+
+# For Dedicated Anaesthetic Room
+aov_dedicated_asa_filtered <- aov(Turnover_Time ~ ASA.class, data=filtered_dedicated_anaesthetic_data)
+tukey_dedicated_asa_filtered <- TukeyHSD(aov_dedicated_asa_filtered, conf.level=0.95)
+print("Tukey HSD post-hoc results for Filtered Dedicated Anaesthetic Room based on ASA Class:")
+print(tukey_dedicated_asa_filtered)
+
+#TYPE OF SURGERY
+# Filtering the data
+filtered_shared_anaesthetic_data <- shared_anaesthetic_data %>%
+  filter(grepl("HIP|KNEE", Local.Proc.Desc, ignore.case = TRUE))
+
+filtered_dedicated_anaesthetic_data <- dedicated_anaesthetic_data %>%
+  filter(grepl("HIP|KNEE", Local.Proc.Desc, ignore.case = TRUE))
+
+# Creating a new column 'Surgery_Type' to classify surgeries as either 'HIP' or 'KNEE'
+filtered_shared_anaesthetic_data$Surgery_Type <- ifelse(grepl("HIP", filtered_shared_anaesthetic_data$Local.Proc.Desc, ignore.case = TRUE), "HIP", "KNEE")
+filtered_dedicated_anaesthetic_data$Surgery_Type <- ifelse(grepl("HIP", filtered_dedicated_anaesthetic_data$Local.Proc.Desc, ignore.case = TRUE), "HIP", "KNEE")
+
+# Descriptive statistics for Shared Anaesthetic Room based on Type of Surgery
+shared_summary_surgery <- filtered_shared_anaesthetic_data %>%
+  group_by(Surgery_Type) %>%
+  summarise(Min = min(Turnover_Time, na.rm = TRUE),
+            `1st Qu` = quantile(Turnover_Time, 0.25, na.rm = TRUE),
+            Median = median(Turnover_Time, na.rm = TRUE),
+            Mean = mean(Turnover_Time, na.rm = TRUE),
+            `3rd Qu` = quantile(Turnover_Time, 0.75, na.rm = TRUE),
+            Max = max(Turnover_Time, na.rm = TRUE))
+
+# Descriptive statistics for Dedicated Anaesthetic Room based on Type of Surgery
+dedicated_summary_surgery <- filtered_dedicated_anaesthetic_data %>%
+  group_by(Surgery_Type) %>%
+  summarise(Min = min(Turnover_Time, na.rm = TRUE),
+            `1st Qu` = quantile(Turnover_Time, 0.25, na.rm = TRUE),
+            Median = median(Turnover_Time, na.rm = TRUE),
+            Mean = mean(Turnover_Time, na.rm = TRUE),
+            `3rd Qu` = quantile(Turnover_Time, 0.75, na.rm = TRUE),
+            Max = max(Turnover_Time, na.rm = TRUE))
+
+print(shared_summary_surgery)
+print(dedicated_summary_surgery)
+
+# Combine both datasets into one for easier plotting
+combined_data <- rbind(
+  filtered_shared_anaesthetic_data %>% mutate(Room_Type = "Shared"),
+  filtered_dedicated_anaesthetic_data %>% mutate(Room_Type = "Dedicated")
+)
+
+# Create the bar plot
+p <- ggplot(combined_data, aes(x = Surgery_Type, y = Turnover_Time, fill = Room_Type)) +
+  geom_bar(stat="summary", fun="mean", position=position_dodge(width=0.8), width=0.7) +
+  geom_errorbar(aes(ymin=..y..-..y.., ymax=..y..+..y..), stat="summary", fun.data=mean_se, position=position_dodge(width=0.8), width=0.25) +
+  labs(title = "Comparison of Turnover Times for HIP and KNEE Surgeries",
+       subtitle = "Based on Shared and Dedicated Anaesthetic Rooms",
+       x = "Type of Surgery",
+       y = "Average Turnover Time (mins)") +
+  theme_minimal() +
+  scale_fill_manual(values=c("Shared" = "#F8766D", "Dedicated" = "#00BFC4")) +
+  geom_text(stat="summary", aes(label=sprintf("%.2f", ..y..)), fun="mean", position=position_dodge(width=0.8), vjust=-0.5)
+
+# Display the plot
+print(p)
+
+# Bar plot for Dedicated Anaesthetic Room
+p_dedicated <- ggplot(filtered_dedicated_anaesthetic_data, aes(x = Surgery_Type, y = Turnover_Time)) +
+  geom_bar(stat="summary", fun="mean", width=0.7, fill="#00BFC4") +
+  geom_errorbar(aes(ymin=..y..-..y.., ymax=..y..+..y..), stat="summary", fun.data=mean_se, width=0.25) +
+  labs(title = "Turnover Times for HIP and KNEE Surgeries (Dedicated Room)",
+       x = "Type of Surgery",
+       y = "Average Turnover Time (mins)") +
+  theme_minimal() +
+  geom_text(stat="summary", aes(label=sprintf("%.2f", ..y..)), fun="mean", vjust=-0.5)
+
+# Display the plot
+print(p_dedicated)
+
+# Bar plot for Shared Anaesthetic Room
+p_shared <- ggplot(filtered_shared_anaesthetic_data, aes(x = Surgery_Type, y = Turnover_Time)) +
+  geom_bar(stat="summary", fun="mean", width=0.7, fill="#F8766D") +
+  geom_errorbar(aes(ymin=..y..-..y.., ymax=..y..+..y..), stat="summary", fun.data=mean_se, width=0.25) +
+  labs(title = "Turnover Times for HIP and KNEE Surgeries (Shared Room)",
+       x = "Type of Surgery",
+       y = "Average Turnover Time (mins)") +
+  theme_minimal() +
+  geom_text(stat="summary", aes(label=sprintf("%.2f", ..y..)), fun="mean", vjust=-0.5)
+
+# Display the plot
+print(p_shared)
+
+# ANOVA for Shared Anaesthetic Room
+anova_shared_surgery <- aov(Turnover_Time ~ Surgery_Type, data=filtered_shared_anaesthetic_data)
+summary_shared_surgery <- summary(anova_shared_surgery)
+
+# ANOVA for Dedicated Anaesthetic Room
+anova_dedicated_surgery <- aov(Turnover_Time ~ Surgery_Type, data=filtered_dedicated_anaesthetic_data)
+summary_dedicated_surgery <- summary(anova_dedicated_surgery)
+
+# Print the results
+print("ANOVA result for Shared Anaesthetic Room based on Type of Surgery:")
+print(summary_shared_surgery)
+
+print("ANOVA result for Dedicated Anaesthetic Room based on Type of Surgery:")
+print(summary_dedicated_surgery)
+
+#PRIORITY TYPE
+colnames(shared_anaesthetic_data)
+
+# Filtering and transforming the data for Shared Anaesthetic Room
+shared_anaesthetic_data$Priority_Type <- ifelse(shared_anaesthetic_data$Priority == "Elective", 
+                                                "Elective", 
+                                                "Emergency")
+
+# Descriptive statistics for Shared Anaesthetic Room based on Priority Type
+shared_summary_Priority <- shared_anaesthetic_data %>%
+  group_by(Priority_Type) %>%
+  summarise(Min = min(Turnover_Time, na.rm = TRUE),
+            `1st Qu` = quantile(Turnover_Time, 0.25, na.rm = TRUE),
+            Median = median(Turnover_Time, na.rm = TRUE),
+            Mean = mean(Turnover_Time, na.rm = TRUE),
+            `3rd Qu` = quantile(Turnover_Time, 0.75, na.rm = TRUE),
+            Max = max(Turnover_Time, na.rm = TRUE))
+
+# Filtering and transforming the data for Dedicated Anaesthetic Room
+dedicated_anaesthetic_data$Priority_Type <- ifelse(dedicated_anaesthetic_data$Priority == "Elective", 
+                                                   "Elective", 
+                                                   "Emergency")
+
+# Descriptive statistics for Dedicated Anaesthetic Room based on Priority Type
+dedicated_summary_priority <- dedicated_anaesthetic_data %>%
+  group_by(Priority_Type) %>%
+  summarise(Min = min(Turnover_Time, na.rm = TRUE),
+            `1st Qu` = quantile(Turnover_Time, 0.25, na.rm = TRUE),
+            Median = median(Turnover_Time, na.rm = TRUE),
+            Mean = mean(Turnover_Time, na.rm = TRUE),
+            `3rd Qu` = quantile(Turnover_Time, 0.75, na.rm = TRUE),
+            Max = max(Turnover_Time, na.rm = TRUE))
+
+# Displaying the summaries
+print(shared_summary_Priority)
+print(dedicated_summary_priority)
+
+# For Shared Anaesthetic Room
+p_shared <- ggplot(shared_summary_Priority, aes(x = Priority_Type, y = Mean, fill = Priority_Type)) +
+  geom_bar(stat="identity", position=position_dodge(width=0.8), width=0.7) +
+  geom_errorbar(aes(ymin=Mean-`1st Qu`, ymax=Mean+`3rd Qu`), position=position_dodge(width=0.8), width=0.25) +
+  labs(title = "Turnover Times for Shared Anaesthetic Room",
+       subtitle = "Based on Priority Type (Elective vs. Emergency)",
+       x = "Priority Type",
+       y = "Average Turnover Time (mins)") +
+  theme_minimal() +
+  scale_fill_manual(values=c("Elective" = "#F8766D", "Emergency" = "#00BFC4")) +
+  geom_text(aes(label=sprintf("%.2f", Mean)), position=position_dodge(width=0.8), vjust=-0.5)
+
+# For Dedicated Anaesthetic Room
+p_dedicated <- ggplot(dedicated_summary_priority, aes(x = Priority_Type, y = Mean, fill = Priority_Type)) +
+  geom_bar(stat="identity", position=position_dodge(width=0.8), width=0.7) +
+  geom_errorbar(aes(ymin=Mean-`1st Qu`, ymax=Mean+`3rd Qu`), position=position_dodge(width=0.8), width=0.25) +
+  labs(title = "Turnover Times for Dedicated Anaesthetic Room",
+       subtitle = "Based on Priority Type (Elective vs. Emergency)",
+       x = "Priority Type",
+       y = "Average Turnover Time (mins)") +
+  theme_minimal() +
+  scale_fill_manual(values=c("Elective" = "#F8766D", "Emergency" = "#00BFC4")) +
+  geom_text(aes(label=sprintf("%.2f", Mean)), position=position_dodge(width=0.8), vjust=-0.5)
+
+# Display the plots
+print(p_shared)
+print(p_dedicated)
+
+# Rename the columns in dedicated_summary_priority for consistency
+dedicated_summary_priority <- dedicated_summary_priority %>%
+  rename(Priority_Type = Priority_Type)
+
+# Combine the summary data for both room types
+combined_summary <- rbind(
+  shared_summary_Priority %>% mutate(Room_Type = "Shared"),
+  dedicated_summary_priority %>% mutate(Room_Type = "Dedicated")
+)
+
+# Generate the bar plot
+p_combined <- ggplot(combined_summary, aes(x = Priority_Type, y = Mean, fill = Room_Type)) +
+  geom_bar(stat="identity", position=position_dodge(width=0.8), width=0.7) +
+  geom_errorbar(aes(ymin=Mean-`1st Qu`, ymax=Mean+`3rd Qu`), position=position_dodge(width=0.8), width=0.25) +
+  labs(title = "Comparison of Turnover Times based on Priority Type",
+       subtitle = "Shared vs. Dedicated Anaesthetic Room",
+       x = "Priority Type",
+       y = "Average Turnover Time (mins)") +
+  theme_minimal() +
+  scale_fill_manual(values=c("Shared" = "#F8766D", "Dedicated" = "#00BFC4")) +
+  geom_text(aes(label=sprintf("%.2f", Mean), group=Room_Type), position=position_dodge(width=0.8), vjust=-0.5)
+
+# Display the plot
+print(p_combined)
+
+# ANOVA for Shared Anaesthetic Room
+aov_shared_priority <- aov(Turnover_Time ~ Priority, data=filtered_shared_anaesthetic_data)
+summary_shared_priority <- summary(aov_shared_priority)
+print("ANOVA result for Shared Anaesthetic Room based on Priority Type:")
+print(summary_shared_priority)
+
+# ANOVA for Dedicated Anaesthetic Room
+aov_dedicated_priority <- aov(Turnover_Time ~ Priority, data=filtered_dedicated_anaesthetic_data)
+summary_dedicated_priority <- summary(aov_dedicated_priority)
+print("ANOVA result for Dedicated Anaesthetic Room based on Priority Type:")
+print(summary_dedicated_priority)
+
+#IMPACT OF POLICY CHANGES
+# Combine the datasets
+combined_data <- rbind(shared_anaesthetic_data, dedicated_anaesthetic_data)
+
+# Filter the combined data for the specified date range
+pre_sept_2022_data <- dplyr::filter(combined_data, Operation.Date >= as.Date("2018-09-01") & Operation.Date <= as.Date("2019-05-31"))
+post_sept_2022_data <- dplyr::filter(combined_data, Operation.Date >= as.Date("2022-09-01"))
+
+pre_sept_2022_data$Waiting_Time <- as.numeric(difftime(pre_sept_2022_data$Into.care.of.anaes, pre_sept_2022_data$Sent.For, units = "mins"))
+post_sept_2022_data$Waiting_Time <- as.numeric(difftime(post_sept_2022_data$Into.care.of.anaes, post_sept_2022_data$Sent.For, units = "mins"))
+
+pre_sept_2022_data$Procedure_Duration <- as.numeric(difftime(pre_sept_2022_data$End.Procedure, pre_sept_2022_data$Start.Procedure, units = "mins"))
+post_sept_2022_data$Procedure_Duration <- as.numeric(difftime(post_sept_2022_data$End.Procedure, post_sept_2022_data$Start.Procedure, units = "mins"))
+
+# Count for pre-September 2022 data
+pre_sept_2022_shared_count <- nrow(shared_anaesthetic_data %>% filter(Operation.Date >= as.Date("2018-09-01") & Operation.Date <= as.Date("2019-05-31")))
+pre_sept_2022_dedicated_count <- nrow(dedicated_anaesthetic_data %>% filter(Operation.Date >= as.Date("2018-09-01") & Operation.Date <= as.Date("2019-05-31")))
+
+# Count for post-September 2022 data
+post_sept_2022_shared_count <- nrow(shared_anaesthetic_data %>% filter(Operation.Date > as.Date("2022-09-01")))
+post_sept_2022_dedicated_count <- nrow(dedicated_anaesthetic_data %>% filter(Operation.Date > as.Date("2022-09-01")))
+
+# Print the results
+cat("Pre-September 2022 Shared Room Patient Count:", pre_sept_2022_shared_count, "\n")
+cat("Pre-September 2022 Dedicated Room Patient Count:", pre_sept_2022_dedicated_count, "\n")
+cat("Post-September 2022 Shared Room Patient Count:", post_sept_2022_shared_count, "\n")
+cat("Post-September 2022 Dedicated Room Patient Count:", post_sept_2022_dedicated_count, "\n")
+
+
+# Print the results
+print(pre_sept_2022_counts)
+print(post_sept_2022_counts)
+
+summary(pre_sept_2022_data$Turnover_Time)
+summary(post_sept_2022_data$Turnover_Time)
+
+summary(pre_sept_2022_data$Waiting_Time)
+summary(post_sept_2022_data$Waiting_Time)
+
+summary(pre_sept_2022_data$Procedure_Duration)
+summary(post_sept_2022_data$Procedure_Duration)
+
+t.test(pre_sept_2022_data$Waiting_Time, post_sept_2022_data$Waiting_Time)
+t.test(pre_sept_2022_data$Turnover_Time, post_sept_2022_data$Turnover_Time)
+t.test(pre_sept_2022_data$Procedure_Duration, post_sept_2022_data$Procedure_Duration)
+
+# Create a data frame for plotting
+plot_data <- data.frame(
+  Room_Type = c("Shared", "Dedicated", "Shared", "Dedicated"),
+  Period = c("Pre-Sept 2022", "Pre-Sept 2022", "Post-Sept 2022", "Post-Sept 2022"),
+  Patient_Count = c(pre_sept_2022_shared_count, pre_sept_2022_dedicated_count, 
+                    post_sept_2022_shared_count, post_sept_2022_dedicated_count)
+)
+
+# Generate the bar plot
+p <- ggplot(plot_data, aes(x=Room_Type, y=Patient_Count, fill=Period)) + 
+  geom_bar(stat="identity", position="dodge") + 
+  labs(title="Comparison of Patient Counts Pre and Post-September 2022",
+       subtitle="Shared vs. Dedicated Anaesthetic Room",
+       x="Room Type", 
+       y="Number of Patients") +
+  theme_minimal() + 
+  scale_fill_manual(values=c("Pre-Sept 2022" = "#F8766D", "Post-Sept 2022" = "#00BFC4"))
+
+# Display the plot
+print(p)
+
+# Derive the Waiting_Time and Procedure_Duration columns for both datasets
+shared_anaesthetic_data$Waiting_Time <- as.numeric(difftime(shared_anaesthetic_data$Into.Theatre, shared_anaesthetic_data$Sent.For, units="mins"))
+shared_anaesthetic_data$Procedure_Duration <- as.numeric(difftime(shared_anaesthetic_data$End.Procedure, shared_anaesthetic_data$Start.Procedure, units="mins"))
+
+dedicated_anaesthetic_data$Waiting_Time <- as.numeric(difftime(dedicated_anaesthetic_data$Into.Theatre, dedicated_anaesthetic_data$Sent.For, units="mins"))
+dedicated_anaesthetic_data$Procedure_Duration <- as.numeric(difftime(dedicated_anaesthetic_data$End.Procedure, dedicated_anaesthetic_data$Start.Procedure, units="mins"))
+
+# Then, compute the means for the pre-September 2022 and post-September 2022 periods
+pre_sept_2022_shared_mean <- colMeans(filter(shared_anaesthetic_data, Operation.Date >= as.Date("2018-09-01") & Operation.Date <= as.Date("2019-05-31"))[c("Turnover_Time", "Waiting_Time", "Procedure_Duration")], na.rm = TRUE)
+pre_sept_2022_dedicated_mean <- colMeans(filter(dedicated_anaesthetic_data, Operation.Date >= as.Date("2018-09-01") & Operation.Date <= as.Date("2019-05-31"))[c("Turnover_Time", "Waiting_Time", "Procedure_Duration")], na.rm = TRUE)
+
+post_sept_2022_shared_mean <- colMeans(filter(shared_anaesthetic_data, Operation.Date >= as.Date("2022-09-01"))[c("Turnover_Time", "Waiting_Time", "Procedure_Duration")], na.rm = TRUE)
+post_sept_2022_dedicated_mean <- colMeans(filter(dedicated_anaesthetic_data, Operation.Date >= as.Date("2022-09-01"))[c("Turnover_Time", "Waiting_Time", "Procedure_Duration")], na.rm = TRUE)
+
+# Data for Turnover Time
+turnover_data <- data.frame(
+  Room_Type = c(rep("Shared", 2), rep("Dedicated", 2)),
+  Time_Period = rep(c("Pre-September 2022", "Post-September 2022"), 2),
+  Value = c(pre_sept_2022_shared_mean["Turnover_Time"], post_sept_2022_shared_mean["Turnover_Time"], 
+            pre_sept_2022_dedicated_mean["Turnover_Time"], post_sept_2022_dedicated_mean["Turnover_Time"])
+)
+
+# Plot for Turnover Time
+turnover_plot <- ggplot(turnover_data, aes(x = Room_Type, y = Value, fill = Time_Period)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(aes(label=sprintf("%.2f", Value)), position=position_dodge(width=0.7), vjust=-0.5) +
+  labs(title = "Comparison of Turnover Time",
+       subtitle = "Before and After September 2022",
+       x = "",
+       y = "Turnover Time (mins)") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Pre-September 2022" = "#F8766D", "Post-September 2022" = "#00BFC4"))
+
+print(turnover_plot)
+
+# Data for Waiting Time
+waiting_data <- data.frame(
+  Room_Type = c(rep("Shared", 2), rep("Dedicated", 2)),
+  Time_Period = rep(c("Pre-September 2022", "Post-September 2022"), 2),
+  Value = c(pre_sept_2022_shared_mean["Waiting_Time"], post_sept_2022_shared_mean["Waiting_Time"], 
+            pre_sept_2022_dedicated_mean["Waiting_Time"], post_sept_2022_dedicated_mean["Waiting_Time"])
+)
+
+# Plot for Waiting Time
+waiting_plot <- ggplot(waiting_data, aes(x = Room_Type, y = Value, fill = Time_Period)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(aes(label=sprintf("%.2f", Value)), position=position_dodge(width=0.7), vjust=-0.5) +
+  labs(title = "Comparison of Waiting Time",
+       subtitle = "Before and After September 2022",
+       x = "",
+       y = "Waiting Time (mins)") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Pre-September 2022" = "#F8766D", "Post-September 2022" = "#00BFC4"))
+
+print(waiting_plot)
+
+# Data for Procedure Duration
+procedure_data <- data.frame(
+  Room_Type = c(rep("Shared", 2), rep("Dedicated", 2)),
+  Time_Period = rep(c("Pre-September 2022", "Post-September 2022"), 2),
+  Value = c(pre_sept_2022_shared_mean["Procedure_Duration"], post_sept_2022_shared_mean["Procedure_Duration"], 
+            pre_sept_2022_dedicated_mean["Procedure_Duration"], post_sept_2022_dedicated_mean["Procedure_Duration"])
+)
+
+# Plot for Procedure Duration
+procedure_plot <- ggplot(procedure_data, aes(x = Room_Type, y = Value, fill = Time_Period)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(aes(label=sprintf("%.2f", Value)), position=position_dodge(width=0.7), vjust=-0.5) +
+  labs(title = "Comparison of Procedure Duration",
+       subtitle = "Before and After September 2022",
+       x = "",
+       y = "Procedure Duration (mins)") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Pre-September 2022" = "#F8766D", "Post-September 2022" = "#00BFC4"))
+
+print(procedure_plot)
+
+# Create a data frame for patient counts
+patient_counts <- data.frame(
+  Room_Type = c("Shared", "Shared", "Dedicated", "Dedicated"),
+  Time_Period = rep(c("Pre-September 2022", "Post-September 2022"), 2),
+  Count = c(643, 392, 1247, 965)
+)
+
+# Generate the bar plot
+patient_count_plot <- ggplot(patient_counts, aes(x = Room_Type, y = Count, fill = Time_Period)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(aes(label = Count), position = position_dodge(width = 0.7), vjust = -0.5) +
+  labs(
+    title = "Comparison of Patient Counts",
+    subtitle = "Before and After September 2022",
+    x = "",
+    y = "Patient Count"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("Pre-September 2022" = "#F8766D", "Post-September 2022" = "#00BFC4"))
+
+# Print the plot
+print(patient_count_plot)
