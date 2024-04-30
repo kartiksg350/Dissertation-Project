@@ -1,13 +1,14 @@
-# Load necessary libraries
+# Libraries Used
 library(dplyr)
 library(readr)
 library(lubridate)
 library(ggplot2)
 library(car)
 
-# Load the combined CSV file
+# For Loading the combined CSV file
 combined_data <- read.csv("/Users/kartiksg/Downloads/combined_data.csv", stringsAsFactors = FALSE)
 
+# DATA PRE-PROCESSING
 # Remove rows with any empty cells
 cleaned_data <- combined_data %>%
   filter(complete.cases(.))
@@ -15,6 +16,7 @@ cleaned_data <- combined_data %>%
 # View the cleaned data
 head(cleaned_data)
 
+#CREATING DIFFERENT SUBSET FOR ACCURATE ANALYSIS
 # Subset for theatres with shared anaesthetic room (Th11 and Th12)
 shared_anaesthetic_data <- cleaned_data %>%
   filter(Theatre %in% c("Th11", "Th12"))
@@ -27,7 +29,9 @@ dedicated_anaesthetic_data <- cleaned_data %>%
 head(shared_anaesthetic_data)
 head(dedicated_anaesthetic_data)
 
+# DATA PR-PROCESSING FOR INDIVIDUAL SUBSET
 # Convert date-time columns to only time format
+
 datetime_cols <- c("Sent.For", "Into.care.of.anaes", "Into.Theatre", "Ready.for.surgeon", "Start.Procedure", "End.Procedure", "Out.of.Theatre", "Leave.recovery")
 shared_anaesthetic_data[datetime_cols] <- lapply(shared_anaesthetic_data[datetime_cols], function(x) {
   format(as.POSIXct(x, format="%Y-%m-%d %H:%M:%S"), "%H:%M:%S")
@@ -44,10 +48,8 @@ shared_anaesthetic_data <- shared_anaesthetic_data %>%
 dedicated_anaesthetic_data <- dedicated_anaesthetic_data %>%
   filter(!is.na(`Into.Theatre`) & !is.na(`Out.of.Theatre`))
 
-# Temporarily restore the full datetime format
-shared_anaesthetic_data[datetime_cols] <- lapply(shared_anaesthetic_data[datetime_cols], function(x) {
-  as.POSIXct(paste(shared_anaesthetic_data$`Operation.Date`, x), format="%Y-%m-%d %H:%M:%S")
-})
+
+# DATA ANALYSIS
 
 # Calculate theatre turnover time for theatres with shared anaesthetic room
 shared_anaesthetic_data <- shared_anaesthetic_data %>%
@@ -55,11 +57,6 @@ shared_anaesthetic_data <- shared_anaesthetic_data %>%
   group_by(Theatre, `Operation.Date`) %>%
   mutate(Turnover_Time = as.numeric(difftime(lead(`Into.Theatre`, 1), `Out.of.Theatre`, units = "mins"))) %>%
   ungroup()
-
-# Temporarily restore the full datetime format for dedicated_anaesthetic_data
-dedicated_anaesthetic_data[datetime_cols] <- lapply(dedicated_anaesthetic_data[datetime_cols], function(x) {
-  as.POSIXct(paste(dedicated_anaesthetic_data$`Operation.Date`, x), format="%Y-%m-%d %H:%M:%S")
-})
 
 # Calculate theatre turnover time for theatres with dedicated anaesthetic room
 dedicated_anaesthetic_data <- dedicated_anaesthetic_data %>%
@@ -79,10 +76,19 @@ dedicated_anaesthetic_data <- dedicated_anaesthetic_data %>%
 head(shared_anaesthetic_data)
 head(dedicated_anaesthetic_data)
 
+
 #SUMMARY STATISTICS FOR SHARED ANAESTHETIC ROOM THEEATRES
 print("Summary statistics for theatres with shared anaesthetic room:")
 shared_summary <- summary(shared_anaesthetic_data$Turnover_Time)
 print(shared_summary)
+
+# SUMMARY STATISTICS FOR DEDICATED ANAESTHETIC ROOM THEEATRES
+print("Summary statistics for theatres with dedicated anaesthetic room:")
+dedicated_summary <- summary(dedicated_anaesthetic_data$Turnover_Time)
+print(dedicated_summary)
+
+
+# DATA VISUALIZATION
 
 # Create the barplot with data labels for Shared Anaesthetic Room
 print("Bar plot for theatres with shared anaesthetic room:")
@@ -104,11 +110,6 @@ plot_shared <- ggplot(shared_anaesthetic_data, aes(x = Theatre, y = Turnover_Tim
   theme_minimal()
 
 print(plot_shared)
-
-#SUMMARY STATISTICS FOR DEDICATED ANAESTHETIC ROOM THEEATRES
-print("Summary statistics for theatres with dedicated anaesthetic room:")
-dedicated_summary <- summary(dedicated_anaesthetic_data$Turnover_Time)
-print(dedicated_summary)
 
 # Create the barplot with data labels for Dedicated Anaesthetic Room
 print("Bar plot for theatres with dedicated anaesthetic room:")
